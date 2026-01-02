@@ -8,7 +8,61 @@
 #include <random>
 #include <numeric>
 #include <iomanip>
+#include <thread>
 
+std::string timeConversionnMS(int ms) {
+    auto x = float(ms);
+    std::string out;
+    if (x < 10) {
+        out += std::to_string(x);
+        out = out.substr(0, 4);
+        out += "ms";
+        return out;
+    } // 0-99ms
+    if (x < 1000) {
+        out += std::to_string(x);
+        out = out.substr(0, 3);
+        out += "ms";
+        return out;
+    } // 100-999ms
+    x /= 1000;
+    if (x < 10) {
+        out += std::to_string(x);
+        out = out.substr(0, 3);
+        out += "s";
+        return out;
+    } // 1-9s
+    if (x < 60) {
+        out += std::to_string(x);
+        out = out.substr(0, 2);
+        out += "s";
+        return out;
+    } // 10-59s
+    x /= 60;
+    if (x < 10) {
+        out += std::to_string(x);
+        out = out.substr(0, 3);
+        out += "m";
+        return out;
+    } // 1-9m
+    if (x < 60) {
+        out += std::to_string(x);
+        out = out.substr(0, 2);
+        out += "m";
+        return out;
+    } // 10-59m
+    x /= 60;
+    if (x < 10) {
+        out += std::to_string(x);
+        out = out.substr(0, 3);
+        out += "h";
+        return out;
+    } // 1-9h
+    out += std::to_string(x); // 10h+
+    out = out.substr(0, 2);
+    out += "h";
+    return out;
+}
 
 void TrainingSettings::validate() const {
     if (populationSize < 2) {
@@ -32,10 +86,10 @@ float NetworkTrainer::evaluateNetwork(const NeuralNetwork& network,
 }
 
 void NetworkTrainer::logProgress(const uint32_t generation, const float best, const float avg,
-                                const TrainingSettings& settings) const {
+                                const TrainingSettings& settings) {
     if (!settings.verbose) return;
 
-    float decay = pow(1-settings.mutationDecay, generation);
+    auto decay = float(pow(1-settings.mutationDecay, generation));
     bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
 
     std::cout << "Gen " << std::setw(5) << generation
@@ -46,6 +100,47 @@ void NetworkTrainer::logProgress(const uint32_t generation, const float best, co
               << std::endl;
 }
 
+void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
+                                                std::vector<float>& fitness,
+                                                const RewardFunction& reward,
+                                                const TrainingSettings& settings) {
+    if (fitness.size() < population.size()) {
+        fitness.resize(population.size());
+    }
+
+    uint32_t numThreads = settings.numThreads == 0 ? std::thread::hardware_concurrency() : settings.numThreads;
+    uint32_t batchSize = settings.batchSize == 0 ? std::max(1u, uint32_t(population.size() / (numThreads * 4))) : settings.batchSize;
+
+    std::mutex mtx;
+    size_t nextIndex = 0;
+
+    auto worker = [&]() {
+        while (true) {
+            size_t startIdx, endIdx;
+            {
+                std::lock_guard lock(mtx);
+                if (nextIndex >= population.size()) break;
+                startIdx = nextIndex;
+                endIdx = std::min(nextIndex + batchSize, population.size());
+                nextIndex = endIdx;
+            }
+
+            for (size_t idx = startIdx; idx < endIdx; ++idx) {
+                fitness[idx] = evaluateNetwork(population[idx], reward);
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(numThreads);
+    for (uint32_t i = 0; i < numThreads; ++i) {
+        threads.emplace_back(worker);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+}
 TrainingResult NetworkTrainer::train(NeuralNetwork& network,
                                      const RewardFunction& reward,
                                      const TrainingSettings& settings) {
@@ -69,7 +164,7 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
 
         switch (settings.algorithm) {
             case TrainingAlgorithm::GENETIC:
-                std::cout << "Genetic Algorithm\n";
+                std::cout << "Genetic\n";
                 break;
             case TrainingAlgorithm::NEUROEVOLUTION:
                 std::cout << "Neuroevolution\n";
@@ -78,6 +173,7 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
                 std::cout << "Random Search\n";
                 break;
         }
+        std::cout << "Generations: " << settings.generations << std::endl;
         std::cout << std::string(60, '-') << std::endl;
     }
 
@@ -103,10 +199,12 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
     network = bestNetwork.clone();
 
     if (settings.verbose) {
+        logProgress(result.generationsTrained, result.bestFitness, result.averageFitness, settings);
         std::cout << std::string(60, '-') << "\n"
                   << "Training complete!\n"
                   << "Best fitness: " << result.bestFitness << "\n"
                   << "Total evaluations: " << result.totalEvaluations << "\n"
+                  << "Total generations: " << result.generationsTrained << "\n"
                   << "Training time: " << result.trainingTime.count() << " ms\n";
     }
 
@@ -136,8 +234,12 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
     }
 
     // Evaluate initial population
-    for (auto& individual : population) {
-        fitness.push_back(evaluateNetwork(individual, reward));
+    if (settings.enableMultithreading) {
+        evaluatePopulationParallel(population, fitness, reward, settings);
+    } else {
+        for (auto& individual : population) {
+            fitness.push_back(evaluateNetwork(individual, reward));
+        }
     }
 
     // Main loop
@@ -165,8 +267,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         }
 
         // Check termination conditions
-        if (bestFit >= settings.targetFitness ||
-            totalEvaluations >= settings.maxEvaluations) {
+        if (bestFit >= settings.targetFitness) {
             result.generationsTrained = gen + 1;
             return;
         }
@@ -174,19 +275,22 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         // Create next generation
         std::vector<NeuralNetwork> nextGen;
         std::vector<float> nextFitness;
+        nextFitness.resize(settings.populationSize);
 
         // Elitism: keep top performers
+
+        uint32_t idx = 0;
         uint32_t eliteSize = std::max(1u, uint32_t(float(settings.populationSize) * settings.elitePercent));
         for (uint32_t i = 0; i < eliteSize && i < indices.size(); ++i) {
             nextGen.push_back(population[indices[i]].clone());
-            nextFitness.push_back(fitness[indices[i]]);
+            nextFitness[idx++] = fitness[indices[i]];
         }
 
         // Reproduction and mutation
-        size_t crossoverAmount = float(settings.populationSize) * settings.crossoverRate;
+        auto crossoverAmount = size_t(float(settings.populationSize) * settings.crossoverRate);
         std::uniform_int_distribution<size_t> parentSelection(0, std::min(crossoverAmount, indices.size() - 1));
 
-        while (nextGen.size() < settings.populationSize) {
+        for (size_t i = eliteSize; i < settings.populationSize; ++i) {
             // Select parents
             size_t parent1Idx = indices[parentSelection(rng)];
             size_t parent2Idx = indices[parentSelection(rng)];
@@ -240,12 +344,16 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
                 }
             }
 
-            float fit = evaluateNetwork(offspring, reward);
-            nextFitness.push_back(fit);
-
             nextGen.push_back(std::move(offspring));
+        }
 
-            if (totalEvaluations >= settings.maxEvaluations) break;
+        if (settings.enableMultithreading) {
+            evaluatePopulationParallel(nextGen, nextFitness, reward, settings);
+        } else {
+            for (size_t i = eliteSize; i < settings.populationSize; ++i) {
+                float fit = evaluateNetwork(nextGen[i], reward);
+                nextFitness[idx++] = fit;
+            }
         }
 
         population = nextGen;
@@ -272,7 +380,14 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
             individual.addNoise(noiseScale);
         }
         population.push_back(individual);
-        fitness.push_back(evaluateNetwork(individual, reward));
+    }
+
+    if (settings.enableMultithreading) {
+        evaluatePopulationParallel(population, fitness, reward, settings);
+    } else {
+        for (auto& individual : population) {
+            fitness.push_back(evaluateNetwork(individual, reward));
+        }
     }
 
     // Main loop
@@ -299,8 +414,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         }
 
         // Check termination
-        if (bestFit >= settings.targetFitness ||
-            totalEvaluations >= settings.maxEvaluations) {
+        if (bestFit >= settings.targetFitness) {
             result.generationsTrained = gen + 1;
             return;
         }
@@ -316,16 +430,18 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         }
 
         // Generate offspring from top specimens
-        while (nextGen.size() < settings.populationSize) {
-            size_t parentIdx = indices[rng() % topCount];
-            auto offspring = population[parentIdx].clone();
-            offspring.addNoise(noiseScale);
+        if (settings.enableMultithreading) {
+            evaluatePopulationParallel(nextGen, nextFitness, reward, settings);
+        } else {
+            while (nextGen.size() < settings.populationSize) {
+                size_t parentIdx = indices[rng() % topCount];
+                auto offspring = population[parentIdx].clone();
+                offspring.addNoise(noiseScale);
 
-            nextGen.push_back(offspring);
-            float fit = evaluateNetwork(offspring, reward);
-            nextFitness.push_back(fit);
-
-            if (totalEvaluations >= settings.maxEvaluations) break;
+                nextGen.push_back(offspring);
+                float fit = evaluateNetwork(offspring, reward);
+                nextFitness.push_back(fit);
+            }
         }
 
         population = nextGen;
@@ -348,7 +464,7 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
 
     // Random search iterations
     uint32_t iterations = 0;
-    while (iterations < settings.generations && totalEvaluations < settings.maxEvaluations) {
+    while (iterations < settings.generations) {
         noiseScale *= 1-settings.mutationDecay;
         // Create random perturbation
         auto candidate = bestNetwork.clone();

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "input_size": 4,
+  "output_size": 1,
+  "layers": [
+    {
+      "index": 0,
+      "input_size": 4,
+      "output_size": 1,
+      "activation": "Linear",
+      "weights": [
+        [8.00000000e+00, 4.00000000e+00, 1.99999976e+00, 9.99999583e-01]
+      ],
+      "biases": [2.02695503e-07]
+    }
+  ]
+}

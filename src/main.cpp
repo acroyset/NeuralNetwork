@@ -3,10 +3,9 @@
 #include "NeuralNetwork/Serialization.h"
 #include <iostream>
 #include <vector>
-#include <cmath>
 
-std::vector<float> inputs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-std::vector<std::vector<float>> outputs = {
+std::vector<float> outputs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+std::vector<std::vector<float>> inputs = {
     {0,0,0,0},
     {0,0,0,1},
     {0,0,1,0},
@@ -29,13 +28,11 @@ float evalFunction(const NeuralNetwork& network) {
     float totalError = 0.0f;
 
     for (int i = 0; i < 16; i++) {
-        float input = inputs[i] / 16.0f;
-        std::vector<float> networkOut = network.forward({input});
-        std::vector<float> expected = outputs[i];
+        const std::vector<float>& input = inputs[i];
+        float networkOut = network.forward(input)[0];
+        float expected = outputs[i];
 
-        for (int j = 0; j < 4; j++) {
-            totalError += std::abs(networkOut[j] - expected[j]);
-        }
+        totalError += abs(networkOut-expected);
     }
 
     // Return positive fitness (lower error = higher fitness)
@@ -44,14 +41,10 @@ float evalFunction(const NeuralNetwork& network) {
 
 int main() {
     std::vector<ActivationFunction*> activations = {
-        new ReLU(),
-        new ReLU(),
-        new ReLU(),
-        new ReLU(),
-        new Sigmoid()
+        new Linear()
     };
 
-    NeuralNetwork network(1, 4, {128, 64, 32, 16}, activations);
+    NeuralNetwork network(4, 1, {}, activations);
 
     for (size_t i = 0; i < network.getLayerCount(); ++i) {
         network.getLayer(i).heInitialize();
@@ -60,32 +53,31 @@ int main() {
     // Configure training
     TrainingSettings settings;
     settings.algorithm = TrainingAlgorithm::GENETIC;
-    settings.populationSize = 128;
-    settings.generations = 5000;
+    settings.populationSize = 512;
+    settings.generations = 10000;
+
     settings.mutationRate = 0.3f;
-    settings.mutationStdDev = 0.8f;
-    settings.mutationDecay = 0.0f;
-    settings.crossoverRate = 0.8f;
+    settings.mutationStdDev = 0.5f;
+    settings.mutationDecay = 0.01f;
+    settings.crossoverRate = 0.7f;
     settings.elitePercent = 0.1f;
-    settings.verbose = true;
-    settings.logInterval = 500;
-    settings.targetFitness = 64.0f;
+
+    settings.logInterval = 200;
+    settings.targetFitness = 63.999999f;
+    settings.enableMultithreading = true;
 
     // Train
     NetworkTrainer trainer;
     auto result = trainer.train(network, evalFunction, settings);
 
+    std::cout << std::endl;
     const auto& bestNet = trainer.getBestNetwork();
     for (int i = 0; i < 16; i++) {
-        auto output = bestNet.forward({float(i)/16.0f});
-        std::cout << i << " -> ";
-        for (int j = 0; j < 4; j++) {
-            std::cout << output[j] << " ";
-        }
-        std::cout << std::endl;
+        auto output = bestNet.forward(inputs[i]);
+        std::cout << i << " -> " << output[0] << std::endl;
     }
 
-    NetworkSerializer::saveJSON(bestNet, "Models/1-4_BinarySolver_01-01-26.json");
+    NetworkSerializer::saveJSON(bestNet, "Models/4-1_BinarySolver_01-01-26.json");
 
     return 0;
 }

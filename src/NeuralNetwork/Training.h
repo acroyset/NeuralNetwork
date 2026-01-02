@@ -5,13 +5,11 @@
 #ifndef TRAINING_H
 #define TRAINING_H
 
-#pragma once
-
 #include "NeuralNetwork.h"
 #include <functional>
 #include <chrono>
 #include <vector>
-
+#include <condition_variable>
 
 using RewardFunction = std::function<float(const NeuralNetwork&)>;
 
@@ -28,11 +26,11 @@ struct TrainingSettings {
     // Population-based settings
     uint32_t populationSize = 50;
     uint32_t generations = 100;
-    float mutationRate = 0.1f;          // Probability of mutation per weight
-    float mutationStdDev = 0.1f;        // Standard deviation of mutation
-    float mutationDecay = 0.01f;        // Percent of StdDev decay per generation
-    float crossoverRate = 0.7f;         // Portion of population that reproduces
-    float elitePercent = 0.1f;          // Percent of population that are considered Elite and stay
+    float mutationRate = 0.1f;           // Probability of mutation per weight
+    float mutationStdDev = 0.1f;         // Standard deviation of mutation
+    float mutationDecay = 0.01f;         // Percent of StdDev decay per generation
+    float crossoverRate = 0.7f;          // Portion of population that reproduces
+    float elitePercent = 0.1f;           // Percent of population that are considered Elite and stay
 
     // Neuroevolution specific
     uint32_t topSpecimens = 10;          // Number of top performers to keep
@@ -42,15 +40,18 @@ struct TrainingSettings {
     bool verbose = true;                 // Print progress information
     uint32_t logInterval = 10;           // Log every N generations
     uint32_t saveInterval = 50;          // Save network every N generations
-    std::string checkpointPath;     // Path to save checkpoints (empty = no saving)
+    std::string checkpointPath;          // Path to save checkpoints (empty = no saving)
 
     // Termination conditions
     float targetFitness = 1000.0f;       // Stop training if fitness reaches this
-    uint32_t maxEvaluations = 1000000;   // Maximum network evaluations
-    std::chrono::seconds timeLimit{3600}; // One hour time limit
 
     // Random seed
     uint32_t randomSeed = 0;             // 0 = use system time
+
+    // Multithreading
+    bool enableMultithreading = false;   // Toggle parallelization
+    uint32_t numThreads = 0;             // 0 = auto-detect
+    uint32_t batchSize = 0;              // 0 = auto-calc, networks per thread
 
     // Validation
     void validate() const;
@@ -86,8 +87,13 @@ class NetworkTrainer {
 
     // Helper functions
     float evaluateNetwork(const NeuralNetwork& network, const RewardFunction& reward);
-    void logProgress(uint32_t generation, float best, float avg,
-                    const TrainingSettings& settings) const;
+    static void logProgress(uint32_t generation, float best, float avg,
+                    const TrainingSettings& settings) ;
+
+    void evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
+                                    std::vector<float>& fitness,
+                                    const RewardFunction& reward,
+                                    const TrainingSettings& settings);
 
 public:
 
