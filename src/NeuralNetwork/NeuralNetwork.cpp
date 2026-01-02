@@ -3,10 +3,9 @@
 //
 
 
-#include "neuralNetwork.h"
+#include "NeuralNetwork.h"
 #include <algorithm>
 #include <iostream>
-#include <__ostream/basic_ostream.h>
 
 // ==================== Layer Implementation ====================
 
@@ -27,7 +26,7 @@ void Layer::xavierInitialize() {
     size_t outputSize = weights.size();
 
     float limit = std::sqrt(6.0f / float(inputSize + outputSize));
-    std::uniform_real_distribution<float> dist(-limit, limit);
+    std::uniform_real_distribution dist(-limit, limit);
 
     for (auto& row : weights) {
         for (auto& w : row) {
@@ -146,7 +145,7 @@ size_t NeuralNetwork::getOutputSize() const {
 }
 
 void NeuralNetwork::addNoise(float stdDev) {
-    std::normal_distribution<float> dist(0.0f, stdDev);
+    std::normal_distribution dist(0.0f, stdDev);
 
     for (auto& layer : layers) {
         auto& weights = layer.getWeights();

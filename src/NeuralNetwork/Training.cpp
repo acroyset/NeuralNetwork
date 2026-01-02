@@ -2,7 +2,7 @@
 // Created by Andreas Royset on 1/1/26.
 //
 
-#include "training.h"
+#include "Training.h"
 #include <iostream>
 #include <algorithm>
 #include <random>
@@ -35,10 +35,14 @@ void NetworkTrainer::logProgress(const uint32_t generation, const float best, co
                                 const TrainingSettings& settings) const {
     if (!settings.verbose) return;
 
+    float decay = pow(1-settings.mutationDecay, generation);
+    bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
+
     std::cout << "Gen " << std::setw(5) << generation
               << " | Best: " << std::setw(10) << std::fixed << std::setprecision(4) << best
               << " | Avg: " << std::setw(10) << std::setprecision(4) << avg
-              << " | Evals: " << std::setw(8) << totalEvaluations
+              << " | " << (isGenetic ? "Mutation: " : "Noise Scale: ") << std::setw(10) << std::setprecision(4)
+              << (isGenetic ? settings.mutationStdDev*decay : settings.noiseScale*decay)
               << std::endl;
 }
 
@@ -119,21 +123,26 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
     std::vector<NeuralNetwork> population;
     std::vector<float> fitness;
 
+    population.reserve(settings.populationSize);
+    fitness.reserve(settings.populationSize);
+
+    float mutationStdDev = settings.mutationStdDev;
+
     for (uint32_t i = 0; i < settings.populationSize; ++i) {
         population.push_back(network.clone());
         if (i > 0) {
-            population[i].addNoise(settings.mutationStdDev);
+            population[i].addNoise(mutationStdDev);
         }
     }
 
     // Evaluate initial population
-    fitness.reserve(population.size());
     for (auto& individual : population) {
         fitness.push_back(evaluateNetwork(individual, reward));
     }
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
+        mutationStdDev *= 1-settings.mutationDecay;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -215,8 +224,8 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
                 // Mutate weights
                 for (auto& row : weights) {
                     for (auto& w : row) {
-                        if (mutationProb(rng) < settings.mutationRate) {  // USE mutationProb here!
-                            std::normal_distribution<float> mutationDist(0.0f, settings.mutationStdDev);
+                        if (mutationProb(rng) < settings.mutationRate) {
+                            std::normal_distribution<float> mutationDist(0.0f, mutationStdDev);
                             w += mutationDist(rng);
                         }
                     }
@@ -224,16 +233,17 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
                 // Mutate biases
                 for (auto& b : biases) {
-                    if (mutationProb(rng) < settings.mutationRate) {  // USE mutationProb here!
-                        std::normal_distribution<float> mutationDist(0.0f, settings.mutationStdDev);
+                    if (mutationProb(rng) < settings.mutationRate) {
+                        std::normal_distribution<float> mutationDist(0.0f, mutationStdDev);
                         b += mutationDist(rng);
                     }
                 }
             }
 
-            nextGen.push_back(offspring);
             float fit = evaluateNetwork(offspring, reward);
             nextFitness.push_back(fit);
+
+            nextGen.push_back(std::move(offspring));
 
             if (totalEvaluations >= settings.maxEvaluations) break;
         }
@@ -254,10 +264,12 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
     std::vector<NeuralNetwork> population;
     std::vector<float> fitness;
 
+    float noiseScale = settings.noiseScale;
+
     for (uint32_t i = 0; i < settings.populationSize; ++i) {
         auto individual = network.clone();
         if (i > 0) {
-            individual.addNoise(settings.noiseScale);
+            individual.addNoise(noiseScale);
         }
         population.push_back(individual);
         fitness.push_back(evaluateNetwork(individual, reward));
@@ -265,6 +277,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
+        noiseScale *= 1-settings.mutationDecay;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -306,7 +319,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         while (nextGen.size() < settings.populationSize) {
             size_t parentIdx = indices[rng() % topCount];
             auto offspring = population[parentIdx].clone();
-            offspring.addNoise(settings.noiseScale);
+            offspring.addNoise(noiseScale);
 
             nextGen.push_back(offspring);
             float fit = evaluateNetwork(offspring, reward);
@@ -331,12 +344,15 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
     result.bestFitness = bestFit;
     bestNetwork = network.clone();
 
+    float noiseScale = settings.noiseScale;
+
     // Random search iterations
     uint32_t iterations = 0;
     while (iterations < settings.generations && totalEvaluations < settings.maxEvaluations) {
+        noiseScale *= 1-settings.mutationDecay;
         // Create random perturbation
         auto candidate = bestNetwork.clone();
-        candidate.addNoise(settings.noiseScale);
+        candidate.addNoise(noiseScale);
 
         float fit = evaluateNetwork(candidate, reward);
 

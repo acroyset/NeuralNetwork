@@ -13,7 +13,7 @@
 #include <random>
 #include <memory>
 #include <stdexcept>
-#include "activationFunctions.h"
+#include "ActivationFunctions.h"
 
 
 class Layer {
@@ -106,7 +106,6 @@ public:
 
     NeuralNetwork clone() const;
 };
-
 
 
 #endif //NEURALNETWORK_H

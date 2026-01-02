@@ -5,98 +5,84 @@
 #include <vector>
 #include <cmath>
 
-// Example 1: Simple XOR Problem
-class XORProblem {
-public:
-    static float evaluateNetwork(const NeuralNetwork& net) {
-        // XOR training data
-        std::vector<std::pair<std::vector<float>, std::vector<float>>> data = {
-            {{0.0f, 0.0f}, {0.0f}},
-            {{0.0f, 1.0f}, {1.0f}},
-            {{1.0f, 0.0f}, {1.0f}},
-            {{1.0f, 1.0f}, {0.0f}}
-        };
-
-        float totalError = 0.0f;
-        for (const auto& [input, target] : data) {
-            auto output = net.forward(input);
-            float error = std::abs(output[0] - target[0]);
-            totalError += error;
-        }
-
-        // Return inverted error as fitness (lower error = higher fitness)
-        return 4.0f - totalError;  // Perfect score is 4.0
-    }
+std::vector<float> inputs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+std::vector<std::vector<float>> outputs = {
+    {0,0,0,0},
+    {0,0,0,1},
+    {0,0,1,0},
+    {0,0,1,1},
+    {0,1,0,0},
+    {0,1,0,1},
+    {0,1,1,0},
+    {0,1,1,1},
+    {1,0,0,0},
+    {1,0,0,1},
+    {1,0,1,0},
+    {1,0,1,1},
+    {1,1,0,0},
+    {1,1,0,1},
+    {1,1,1,0},
+    {1,1,1,1},
 };
 
-// Example 2: Function Approximation (sin function)
-class SinApproximation {
-public:
-    static float evaluateNetwork(const NeuralNetwork& net) {
-        float totalError = 0.0f;
+float evalFunction(const NeuralNetwork& network) {
+    float totalFitness = 0.0f;
 
-        // Test on 20 points
-        for (int i = 0; i < 20; ++i) {
-            float x = (float(i) / 19.0f) * 2.0f * 3.14159f;
-            auto output = net.forward({x});
-            float expectedOutput = (std::sin(x) + 1.0f) / 2.0f;  // Normalize to [0, 1]
-            float error = std::abs(output[0] - expectedOutput);
-            totalError += error;
+    for (int i = 0; i < 16; i++) {
+        float input = inputs[i];
+
+        std::vector<float> networkOut = network.forward({input});
+        std::vector<float> expected = outputs[i];
+
+        float fitness = 0;
+
+        for (int j = 0; j < 4; j++) {
+            fitness -= float(pow(networkOut[j] - expected[j], 2));
         }
 
-        return 20.0f - totalError;
+        totalFitness += fitness;
     }
-};
+
+    return totalFitness/16;
+}
 
 int main() {
-    std::cout << "\n";
-    std::cout << "╔════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║         Neural Network Library - Comprehensive Examples    ║\n";
-    std::cout << "╚════════════════════════════════════════════════════════════╝\n";
-
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "EXAMPLE 1: XOR Problem Training\n";
-    std::cout << std::string(70, '=') << "\n\n";
-
-    // Create network: 2 inputs -> 4 hidden -> 1 output
     std::vector<ActivationFunction*> activations = {
-        new ReLU(),      // Hidden layer activation
-        new Sigmoid()    // Output layer activation
+        new LeakyReLU(),
+        new LeakyReLU(),
+        new LeakyReLU(),
+        new Sigmoid()
     };
 
-    NeuralNetwork network(2, 1, {4}, activations);
+    NeuralNetwork network(1, 4, {16, 32, 8}, activations);
 
     // Configure training
     TrainingSettings settings;
     settings.algorithm = TrainingAlgorithm::GENETIC;
-    settings.populationSize = 50;
+    settings.populationSize = 128;
     settings.generations = 1000;
-    settings.mutationRate = 0.2f;
+    settings.mutationRate = 0.1f;
     settings.mutationStdDev = 0.5f;
+    settings.mutationDecay = 0.0005f;
     settings.verbose = true;
     settings.logInterval = 100;
-    settings.targetFitness = 4.0f;  // Very good XOR solution
+    settings.targetFitness = 0.0f;
 
     // Train
     NetworkTrainer trainer;
-    auto result = trainer.train(network, XORProblem::evaluateNetwork, settings);
-
-    // Evaluate on test data
-    std::cout << "\n\nFinal XOR Test:\n";
-    std::vector<std::pair<std::vector<float>, std::string>> tests = {
-        {{0.0f, 0.0f}, "0 XOR 0 should be ~0: "},
-        {{0.0f, 1.0f}, "0 XOR 1 should be ~1: "},
-        {{1.0f, 0.0f}, "1 XOR 0 should be ~1: "},
-        {{1.0f, 1.0f}, "1 XOR 1 should be ~0: "}
-    };
+    auto result = trainer.train(network, evalFunction, settings);
 
     const auto& bestNet = trainer.getBestNetwork();
-    for (const auto& [input, label] : tests) {
-        auto output = bestNet.forward(input);
-        std::cout << label << output[0] << "\n";
+    for (int i = 0; i < 16; i++) {
+        auto output = bestNet.forward({float(i)});
+        std::cout << i << " -> ";
+        for (int j = 0; j < 4; j++) {
+            std::cout << output[j] << " ";
+        }
+        std::cout << std::endl;
     }
 
-    NetworkSerializer::saveJSON(bestNet, "Models/XOR_Genetic_01-01-26.json");
+    NetworkSerializer::saveJSON(bestNet, "Models/1-4_BinarySolver_01-01-26.json");
 
     return 0;
 }

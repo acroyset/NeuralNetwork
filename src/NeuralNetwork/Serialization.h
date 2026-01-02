@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "neuralNetwork.h"
+#include "NeuralNetwork.h"
 #include <fstream>
 
 
