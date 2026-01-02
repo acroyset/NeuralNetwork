@@ -128,6 +128,9 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
             case TrainingAlgorithm::RANDOM_SEARCH:
                 std::cout << "Random Search\n";
                 break;
+            case TrainingAlgorithm::GRADIENT_DESCENT:
+                std::cout << "Gradient Descent\n";
+                break;
         }
         std::cout << "Generations: " << settings.generations << std::endl;
         std::cout << std::string(60, '-') << std::endl;
@@ -143,6 +146,9 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
             break;
         case TrainingAlgorithm::RANDOM_SEARCH:
             trainRandomSearch(network, reward, settings);
+            break;
+        case TrainingAlgorithm::GRADIENT_DESCENT:
+            trainGradientDescent(network, reward, settings);
             break;
     }
 
@@ -457,4 +463,133 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
     }
 
     result.generationsTrained = iterations;
+}
+
+void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
+                                          const RewardFunction& reward,
+                                          const TrainingSettings& settings) {
+    if (!settings.trainingData) {
+        throw std::invalid_argument("Training data required for gradient descent");
+    }
+    if (settings.trainingData->inputs.empty()) {
+        throw std::invalid_argument("Training data is empty");
+    }
+    if (settings.learningRate <= 0) {
+        throw std::invalid_argument("Learning rate must be positive");
+    }
+
+    auto startTime = std::chrono::high_resolution_clock::now();
+    totalEvaluations = 0;
+    result = TrainingResult();
+    bestNetwork = network.clone();
+
+    float learningRate = settings.learningRate;
+    const auto& inputs = settings.trainingData->inputs;
+    const auto& outputs = settings.trainingData->outputs;
+    uint32_t dataSize = inputs.size();
+
+    if (inputs.size() != outputs.size()) {
+        throw std::invalid_argument("Input and output size mismatch");
+    }
+
+    if (settings.verbose) {
+        std::cout << "Starting training with Gradient Descent (Backprop)\n"
+                  << "Learning rate: " << learningRate << "\n"
+                  << "Learning rate decay: " << settings.learningRateDecay << "\n"
+                  << "Batch size: " << (settings.batchSize == 0 ? dataSize : settings.batchSize) << "\n"
+                  << std::string(60, '-') << std::endl;
+    }
+
+    std::mt19937 rng(settings.randomSeed ? settings.randomSeed : std::random_device{}());
+    std::uniform_int_distribution<uint32_t> sampleDist(0, dataSize - 1);
+
+    for (uint32_t gen = 0; gen < settings.generations; ++gen) {
+        // Decay learning rate
+        if (settings.learningRateDecay > 0) {
+            learningRate = settings.learningRate * std::pow(1.0f - settings.learningRateDecay, float(gen));
+        }
+
+        // Determine batch size
+        uint32_t batchSize = settings.batchSize == 0 ? dataSize : settings.batchSize;
+
+        // Zero gradients before batch
+        network.zeroGradients();
+
+        // Process mini-batch
+        float batchMSE = 0.0f;
+        for (uint32_t b = 0; b < batchSize; ++b) {
+            uint32_t idx = sampleDist(rng);
+
+            // Forward pass
+            auto predictions = network.forward(inputs[idx]);
+            const auto& expected = outputs[idx];
+
+            // Compute loss for all outputs
+            float sampleMSE = 0.0f;
+            std::vector<float> outputGradients(predictions.size());
+            for (size_t i = 0; i < predictions.size(); ++i) {
+                float error = predictions[i] - expected[i];
+                sampleMSE += error * error;
+                outputGradients[i] = 2.0f * error;  // MSE gradient
+            }
+            batchMSE += sampleMSE / float(predictions.size());
+
+            // Backward pass
+            network.backward(outputGradients);
+        }
+
+        batchMSE /= float(batchSize);
+
+        // Update weights once per batch
+        network.updateWeights(learningRate);
+
+        // Evaluate on full dataset periodically
+        if (gen % settings.logInterval == 0) {
+            float fullDatasetMSE = 0.0f;
+            for (size_t i = 0; i < inputs.size(); ++i) {
+                auto pred = network.forward(inputs[i]);
+                for (size_t j = 0; j < pred.size(); ++j) {
+                    float error = pred[j] - outputs[i][j];
+                    fullDatasetMSE += error * error;
+                }
+            }
+            fullDatasetMSE /= float(inputs.size() * network.getOutputSize());
+            float rmse = std::sqrt(fullDatasetMSE);
+            float fitness = 64.0f - rmse;
+
+            if (fitness > result.bestFitness) {
+                result.bestFitness = fitness;
+                bestNetwork = network.clone();
+            }
+
+            result.fitnessHistory.push_back(fitness);
+
+            if (settings.verbose) {
+                std::cout << "Gen " << std::setw(5) << gen
+                          << " | RMSE: " << std::setw(10) << std::fixed << std::setprecision(4) << rmse
+                          << " | LR: " << std::setw(10) << std::setprecision(6) << learningRate
+                          << std::endl;
+            }
+        }
+
+        // Check termination
+        if (result.bestFitness >= settings.targetFitness) {
+            result.generationsTrained = gen + 1;
+            break;
+        }
+
+        result.generationsTrained = gen + 1;
+    }
+
+    auto endTime = std::chrono::high_resolution_clock::now();
+    result.trainingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+    network = bestNetwork.clone();
+
+    if (settings.verbose) {
+        std::cout << std::string(60, '-') << "\n"
+                  << "Training complete!\n"
+                  << "Best fitness: " << result.bestFitness << "\n"
+                  << "Total generations: " << result.generationsTrained << "\n"
+                  << "Training time: " << result.trainingTime.count() << " ms\n";
+    }
 }

@@ -21,15 +21,27 @@ class Layer {
     std::vector<float> biases;                 // [output_size]
     std::unique_ptr<ActivationFunction> activation;
 
-    // For backprop
     mutable std::vector<float> inputs;
     mutable std::vector<float> outputs;
-    mutable std::vector<float> deltas;
+    mutable std::vector<float> z;  // Pre-activation values
+
+    // Backpropagation
+    std::vector<std::vector<float>> weightGradients;
+    std::vector<float> biasGradients;
+    std::vector<float> deltas;
 
 public:
     Layer(size_t inputSize, size_t outputSize, ActivationFunction* activation);
 
     std::vector<float> forward(const std::vector<float>& input) const;
+
+    void backward(const std::vector<float>& outputGradients);
+
+    void updateWeights(float learningRate);
+
+    void zeroGradients();
+
+    std::vector<float> getInputGradients() const;
 
     std::vector<std::vector<float>>& getWeights() { return weights; }  // MUTABLE
     const std::vector<std::vector<float>>& getWeights() const { return weights; }  // CONST
@@ -78,6 +90,12 @@ public:
 
     [[nodiscard]] std::vector<float> forward(const std::vector<float>& input) const;
 
+    void backward(const std::vector<float>& outputGradients);
+
+    void updateWeights(float learningRate);
+
+    void zeroGradients();
+
     [[nodiscard]] size_t getLayerCount() const { return layers.size(); }
 
     Layer& getLayer(size_t index) {
@@ -87,24 +105,24 @@ public:
         return layers[index];
     }
 
-    const Layer& getLayer(size_t index) const {
+    [[nodiscard]] const Layer& getLayer(size_t index) const {
         if (index >= layers.size()) {
             throw std::out_of_range("Layer index out of range");
         }
         return layers[index];
     }
 
-    size_t getInputSize() const;
+    [[nodiscard]] size_t getInputSize() const;
 
-    size_t getOutputSize() const;
+    [[nodiscard]] size_t getOutputSize() const;
 
     std::vector<Layer>& getLayers() { return layers; }
 
-    const std::vector<Layer>& getLayers() const { return layers; }
+    [[nodiscard]] const std::vector<Layer>& getLayers() const { return layers; }
 
     void addNoise(float stdDev);
 
-    NeuralNetwork clone() const;
+    [[nodiscard]] NeuralNetwork clone() const;
 };
 
 

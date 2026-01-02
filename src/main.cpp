@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 
-std::vector<float> outputs = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+std::vector<std::vector<float>> outputs = {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12}, {13}, {14}, {15}};
 std::vector<std::vector<float>> inputs = {
     {0,0,0,0},
     {0,0,0,1},
@@ -30,7 +30,7 @@ float evalFunction(const NeuralNetwork& network) {
     for (int i = 0; i < 16; i++) {
         const std::vector<float>& input = inputs[i];
         float networkOut = network.forward(input)[0];
-        float expected = outputs[i];
+        float expected = outputs[i][0];
 
         totalError += abs(networkOut-expected);
     }
@@ -41,10 +41,12 @@ float evalFunction(const NeuralNetwork& network) {
 
 int main() {
     std::vector<ActivationFunction*> activations = {
-        new Linear()
+        new ReLU(),
+        new ReLU(),
+        new Sigmoid()
     };
 
-    NeuralNetwork network(4, 1, {}, activations);
+    NeuralNetwork network(1, 4, {16, 8}, activations);
 
     for (size_t i = 0; i < network.getLayerCount(); ++i) {
         network.getLayer(i).heInitialize();
@@ -52,19 +54,18 @@ int main() {
 
     // Configure training
     TrainingSettings settings;
-    settings.algorithm = TrainingAlgorithm::GENETIC;
-    settings.populationSize = 512;
+    settings.algorithm = TrainingAlgorithm::GRADIENT_DESCENT;
     settings.generations = 10000;
-
-    settings.mutationRate = 0.3f;
-    settings.mutationStdDev = 0.5f;
-    settings.mutationDecay = 0.01f;
-    settings.crossoverRate = 0.7f;
-    settings.elitePercent = 0.1f;
 
     settings.logInterval = 200;
     settings.targetFitness = 63.999999f;
-    settings.enableMultithreading = true;
+    settings.enableMultithreading = false;
+    settings.batchSize = 8;
+
+    TrainingData data;
+    data.inputs = outputs;
+    data.outputs = inputs;
+    settings.trainingData = &data;
 
     // Train
     NetworkTrainer trainer;

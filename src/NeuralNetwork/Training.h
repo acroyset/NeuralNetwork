@@ -13,10 +13,16 @@
 
 using RewardFunction = std::function<float(const NeuralNetwork&)>;
 
+struct TrainingData {
+    std::vector<std::vector<float>> inputs;
+    std::vector<std::vector<float>> outputs;
+};
+
 enum class TrainingAlgorithm {
     GENETIC,           // Genetic algorithm
     NEUROEVOLUTION,    // Neuroevolution (NEAT-like)
-    RANDOM_SEARCH      // Random search with noise
+    RANDOM_SEARCH,     // Random search with noise
+    GRADIENT_DESCENT   // Gradient descent with backpropagation
 };
 
 struct TrainingSettings {
@@ -36,6 +42,12 @@ struct TrainingSettings {
     uint32_t topSpecimens = 10;          // Number of top performers to keep
     float noiseScale = 0.15f;            // Noise scale for exploration
 
+    // Gradient descent specific
+    float learningRate = 0.01f;          // Learning rate (alpha)
+    float learningRateDecay = 0.0f;      // Decay per generation (0 = no decay)
+    uint32_t batchSize = 16;             // Mini-batch size (or 0 for full dataset)
+    TrainingData* trainingData = nullptr;// Required for GRADIENT_DESCENT, ignored for other algorithms
+
     // Training behavior
     bool verbose = true;                 // Print progress information
     uint32_t logInterval = 10;           // Log every N generations
@@ -51,7 +63,6 @@ struct TrainingSettings {
     // Multithreading
     bool enableMultithreading = false;   // Toggle parallelization
     uint32_t numThreads = 0;             // 0 = auto-detect
-    uint32_t batchSize = 0;              // 0 = auto-calc, networks per thread
 
     // Validation
     void validate() const;
@@ -82,6 +93,10 @@ class NetworkTrainer {
                             const TrainingSettings& settings);
 
     void trainRandomSearch(const NeuralNetwork& network,
+                          const RewardFunction& reward,
+                          const TrainingSettings& settings);
+
+    void trainGradientDescent(NeuralNetwork& network,
                           const RewardFunction& reward,
                           const TrainingSettings& settings);
 

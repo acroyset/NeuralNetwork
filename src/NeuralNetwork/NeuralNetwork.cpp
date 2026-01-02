@@ -60,16 +60,78 @@ std::vector<float> Layer::forward(const std::vector<float>& input) const {
 
     inputs = input;
     outputs.resize(weights.size());
+    z.resize(weights.size());
 
     for (size_t i = 0; i < weights.size(); ++i) {
         float sum = biases[i];
         for (size_t j = 0; j < input.size(); ++j) {
             sum += weights[i][j] * input[j];
         }
+        z[i] = sum;  // Store pre-activation
         outputs[i] = activation->activate(sum);
     }
 
     return outputs;
+}
+
+void Layer::backward(const std::vector<float>& outputGradients) {
+    if (outputGradients.size() != outputs.size()) {
+        throw std::invalid_argument("Output gradient size mismatch");
+    }
+
+    // Initialize gradients if empty (for accumulation)
+    if (weightGradients.empty()) {
+        weightGradients.assign(weights.size(), std::vector<float>(weights[0].size(), 0.0f));
+        biasGradients.assign(biases.size(), 0.0f);
+    }
+
+    deltas.resize(outputGradients.size());
+
+    // Compute deltas: dL/dz = dL/da * da/dz
+    for (size_t i = 0; i < outputGradients.size(); ++i) {
+        float activationDeriv = activation->derivative(z[i]);
+        deltas[i] = outputGradients[i] * activationDeriv;
+    }
+
+    // Accumulate weight gradients: dL/dW += delta * input
+    for (size_t i = 0; i < weights.size(); ++i) {
+        for (size_t j = 0; j < weights[i].size(); ++j) {
+            weightGradients[i][j] += deltas[i] * inputs[j];  // += to accumulate
+        }
+    }
+
+    // Accumulate bias gradients: dL/db += delta
+    for (size_t i = 0; i < biases.size(); ++i) {
+        biasGradients[i] += deltas[i];  // += to accumulate
+    }
+}
+
+std::vector<float> Layer::getInputGradients() const {
+    std::vector<float> inputGradients(inputs.size(), 0.0f);
+    for (size_t i = 0; i < deltas.size(); ++i) {
+        for (size_t j = 0; j < inputs.size(); ++j) {
+            inputGradients[j] += deltas[i] * weights[i][j];
+        }
+    }
+    return inputGradients;
+}
+
+void Layer::updateWeights(float learningRate) {
+    for (size_t i = 0; i < weights.size(); ++i) {
+        for (size_t j = 0; j < weights[i].size(); ++j) {
+            weights[i][j] -= learningRate * weightGradients[i][j];
+        }
+    }
+    for (size_t i = 0; i < biases.size(); ++i) {
+        biases[i] -= learningRate * biasGradients[i];
+    }
+}
+
+void Layer::zeroGradients() {
+    for (auto& row : weightGradients) {
+        std::fill(row.begin(), row.end(), 0.0f);
+    }
+    std::fill(biasGradients.begin(), biasGradients.end(), 0.0f);
 }
 
 Layer Layer::clone() const {
@@ -132,6 +194,30 @@ std::vector<float> NeuralNetwork::forward(const std::vector<float>& input) const
     }
 
     return current;
+}
+
+void NeuralNetwork::backward(const std::vector<float>& outputGradients) {
+    std::vector<float> currentGradients = outputGradients;
+
+    for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
+        layers[i].backward(currentGradients);
+
+        if (i > 0) {
+            currentGradients = layers[i].getInputGradients();
+        }
+    }
+}
+
+void NeuralNetwork::updateWeights(float learningRate) {
+    for (auto& layer : layers) {
+        layer.updateWeights(learningRate);
+    }
+}
+
+void NeuralNetwork::zeroGradients() {
+    for (auto& layer : layers) {
+        layer.zeroGradients();
+    }
 }
 
 size_t NeuralNetwork::getInputSize() const {
