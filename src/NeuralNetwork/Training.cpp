@@ -10,60 +10,6 @@
 #include <iomanip>
 #include <thread>
 
-std::string timeConversionnMS(int ms) {
-    auto x = float(ms);
-    std::string out;
-    if (x < 10) {
-        out += std::to_string(x);
-        out = out.substr(0, 4);
-        out += "ms";
-        return out;
-    } // 0-99ms
-    if (x < 1000) {
-        out += std::to_string(x);
-        out = out.substr(0, 3);
-        out += "ms";
-        return out;
-    } // 100-999ms
-    x /= 1000;
-    if (x < 10) {
-        out += std::to_string(x);
-        out = out.substr(0, 3);
-        out += "s";
-        return out;
-    } // 1-9s
-    if (x < 60) {
-        out += std::to_string(x);
-        out = out.substr(0, 2);
-        out += "s";
-        return out;
-    } // 10-59s
-    x /= 60;
-    if (x < 10) {
-        out += std::to_string(x);
-        out = out.substr(0, 3);
-        out += "m";
-        return out;
-    } // 1-9m
-    if (x < 60) {
-        out += std::to_string(x);
-        out = out.substr(0, 2);
-        out += "m";
-        return out;
-    } // 10-59m
-    x /= 60;
-    if (x < 10) {
-        out += std::to_string(x);
-        out = out.substr(0, 3);
-        out += "h";
-        return out;
-    } // 1-9h
-    out += std::to_string(x); // 10h+
-    out = out.substr(0, 2);
-    out += "h";
-    return out;
-}
-
 void TrainingSettings::validate() const {
     if (populationSize < 2) {
         throw std::invalid_argument("Population size must be at least 2");
@@ -103,7 +49,8 @@ void NetworkTrainer::logProgress(const uint32_t generation, const float best, co
 void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
                                                 std::vector<float>& fitness,
                                                 const RewardFunction& reward,
-                                                const TrainingSettings& settings) {
+                                                const TrainingSettings& settings,
+                                                const uint32_t skipIdx = 0) {
     if (fitness.size() < population.size()) {
         fitness.resize(population.size());
     }
@@ -112,7 +59,7 @@ void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& popu
     uint32_t batchSize = settings.batchSize == 0 ? std::max(1u, uint32_t(population.size() / (numThreads * 4))) : settings.batchSize;
 
     std::mutex mtx;
-    size_t nextIndex = 0;
+    size_t nextIndex = skipIdx;
 
     auto worker = [&]() {
         while (true) {
@@ -125,8 +72,16 @@ void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& popu
                 nextIndex = endIdx;
             }
 
+            std::vector<float>tempFit;
             for (size_t idx = startIdx; idx < endIdx; ++idx) {
-                fitness[idx] = evaluateNetwork(population[idx], reward);
+                tempFit.push_back(evaluateNetwork(population[idx], reward));
+            }
+
+            {
+                std::lock_guard lock(mtx);
+                for (size_t idx = startIdx; idx < endIdx; ++idx) {
+                    fitness[idx] = tempFit[idx-startIdx];
+                }
             }
         }
     };
@@ -141,6 +96,7 @@ void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& popu
         t.join();
     }
 }
+
 TrainingResult NetworkTrainer::train(NeuralNetwork& network,
                                      const RewardFunction& reward,
                                      const TrainingSettings& settings) {
@@ -222,7 +178,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
     std::vector<float> fitness;
 
     population.reserve(settings.populationSize);
-    fitness.reserve(settings.populationSize);
+    fitness.resize(settings.populationSize);
 
     float mutationStdDev = settings.mutationStdDev;
 
@@ -237,8 +193,8 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
     if (settings.enableMultithreading) {
         evaluatePopulationParallel(population, fitness, reward, settings);
     } else {
-        for (auto& individual : population) {
-            fitness.push_back(evaluateNetwork(individual, reward));
+        for (size_t i = 0; i < settings.populationSize; ++i) {
+            fitness[i] = evaluateNetwork(population[i], reward);
         }
     }
 
@@ -348,11 +304,11 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         }
 
         if (settings.enableMultithreading) {
-            evaluatePopulationParallel(nextGen, nextFitness, reward, settings);
+            evaluatePopulationParallel(nextGen, nextFitness, reward, settings, eliteSize);
         } else {
             for (size_t i = eliteSize; i < settings.populationSize; ++i) {
                 float fit = evaluateNetwork(nextGen[i], reward);
-                nextFitness[idx++] = fit;
+                nextFitness[i] = fit;
             }
         }
 
@@ -422,25 +378,33 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         // Keep top specimens and mutate
         std::vector<NeuralNetwork> nextGen;
         std::vector<float> nextFitness;
+        nextFitness.resize(settings.populationSize);
 
+        uint32_t idx = 0;
         uint32_t topCount = std::min(settings.topSpecimens, uint32_t(indices.size()));
         for (uint32_t i = 0; i < topCount; ++i) {
             nextGen.push_back(population[indices[i]].clone());
-            nextFitness.push_back(fitness[indices[i]]);
+            nextFitness[idx++] = fitness[indices[i]];
         }
 
         // Generate offspring from top specimens
-        if (settings.enableMultithreading) {
-            evaluatePopulationParallel(nextGen, nextFitness, reward, settings);
-        } else {
-            while (nextGen.size() < settings.populationSize) {
-                size_t parentIdx = indices[rng() % topCount];
-                auto offspring = population[parentIdx].clone();
-                offspring.addNoise(noiseScale);
+        while (nextGen.size() < settings.populationSize) {
+            size_t parentIdx = indices[rng() % topCount];
+            auto offspring = population[parentIdx].clone();
+            offspring.addNoise(noiseScale);
 
-                nextGen.push_back(offspring);
-                float fit = evaluateNetwork(offspring, reward);
-                nextFitness.push_back(fit);
+            nextGen.push_back(offspring);
+        }
+
+        if (settings.enableMultithreading) {
+            std::vector offspringToEval(nextGen.begin() + topCount, nextGen.end());
+            std::vector<float> offspringFitness;
+            evaluatePopulationParallel(offspringToEval, offspringFitness, reward, settings);
+            nextFitness.insert(nextFitness.end(), offspringFitness.begin(), offspringFitness.end());
+        } else {
+            for (uint32_t i = topCount; i < settings.populationSize; ++i) {
+                float fit = evaluateNetwork(nextGen[i], reward);
+                nextFitness[idx++] = fit;
             }
         }
 

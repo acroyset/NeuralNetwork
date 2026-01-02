@@ -93,7 +93,8 @@ class NetworkTrainer {
     void evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
                                     std::vector<float>& fitness,
                                     const RewardFunction& reward,
-                                    const TrainingSettings& settings);
+                                    const TrainingSettings& settings,
+                                    uint32_t startIdx);
 
 public:
 
