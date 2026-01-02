@@ -28,9 +28,9 @@ float evalFunction(const NeuralNetwork& network) {
     float totalError = 0.0f;
 
     for (int i = 0; i < 16; i++) {
-        std::vector<float> input = outputs[i];
+        const std::vector<float>& input = inputs[i];
         std::vector<float> networkOut = network.forward(input);
-        std::vector<float> expected = inputs[i];
+        const std::vector<float>& expected = outputs[i];
 
         float error = 0;
 
@@ -46,27 +46,31 @@ float evalFunction(const NeuralNetwork& network) {
 }
 
 int main() {
+    for (auto& input : inputs) {
+        input[0] /= 15.0f;  // Normalize 0-15 to 0-1
+    }
+
     std::vector<ActivationFunction*> activations = {
-        new ReLU(),
-        new ReLU(),
-        new Sigmoid()
+        new Tanh(),      // Better for small single input
+        new Tanh(),
+        new Tanh(),
+        new Sigmoid()    // For binary outputs [0,1]
     };
 
-    NeuralNetwork network(1, 4, {16, 8}, activations);
+    // Larger hidden layers to memorize the mapping
+    NeuralNetwork network(1, 4, {64, 64, 32}, activations);
 
     for (size_t i = 0; i < network.getLayerCount(); ++i) {
         network.getLayer(i).heInitialize();
     }
 
-    // Configure training
     TrainingSettings settings;
-    settings.algorithm = TrainingAlgorithm::GENETIC;
+    settings.algorithm = TrainingAlgorithm::GRADIENT_DESCENT;
     settings.generations = 10000;
-
-    settings.logInterval = 200;
-    settings.targetFitness = 63.999999f;
-    settings.enableMultithreading = false;
-    settings.batchSize = 8;
+    settings.learningRate = 0.05f;
+    settings.decayRate = 0.0001f;
+    settings.logInterval = 500;
+    settings.batchSize = 4;
 
     TrainingData data;
     data.inputs = outputs;
@@ -80,10 +84,10 @@ int main() {
     std::cout << std::endl;
     const auto& bestNet = trainer.getBestNetwork();
     for (int i = 0; i < 16; i++) {
-        auto output = bestNet.forward({float(i)});
+        auto output = bestNet.forward(outputs[i]);
         std::cout << i << " -> ";
-        for (size_t j = 0; j < output.size(); ++j) {
-            std::cout << (output[j] > 0.5f ? 1 : 0);  // Print binary
+        for (float j : inputs[i]) {
+            std::cout << j << " ";
         }
         std::cout << std::endl;
     }

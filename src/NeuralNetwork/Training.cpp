@@ -11,18 +11,26 @@
 #include <thread>
 
 void TrainingSettings::validate() const {
-    if (populationSize < 2) {
-        throw std::invalid_argument("Population size must be at least 2");
-    }
-    if (generations == 0) {
-        throw std::invalid_argument("Generations must be greater than 0");
-    }
-    if (mutationRate < 0.0f || mutationRate > 1.0f) {
-        throw std::invalid_argument("Mutation rate must be between 0 and 1");
-    }
-    if (crossoverRate < 0.0f || crossoverRate > 1.0f) {
-        throw std::invalid_argument("Crossover rate must be between 0 and 1");
-    }
+    if (algorithm == TrainingAlgorithm::NONE) std::cerr << "Training algorithm not set" << std::endl;
+
+    if (populationSize == 0) std::cerr << "Population size not set" << std::endl;
+    if (populationSize < 0) std::cerr << "Population size can't be negative" << std::endl;
+
+    if (generations == 0) std::cerr << "Generations not set" << std::endl;
+    if (generations < 0) std::cerr << "Invalid number of generations" << std::endl;
+
+    if (noiseStdDev <= 0) std::cerr << "Invalid Noise standard deviation" << std::endl;
+    if (crossoverRate <= 0 || crossoverRate > 1) std::cerr << "Invalid Crossover rate" << std::endl;
+    if (topPercentage <= 0 || topPercentage > 1) std::cerr << "Invalid Top Percentage" << std::endl;
+
+    if (decayRate <= 0 || decayRate > 1) std::cerr << "Invalid Decay rate" << std::endl;
+
+    if (learningRate <= 0) std::cerr << "Invalid Learning Rate" << std::endl;
+    if (batchSize < 0) std::cerr << "Invalid Batch Size" << std::endl;
+
+    if (logInterval < 0) std::cerr << "Invalid Log Interval" << std::endl;
+
+    if (numThreads < 0) std::cerr << "Invalid Number of Threads" << std::endl;
 }
 
 float NetworkTrainer::evaluateNetwork(const NeuralNetwork& network,
@@ -34,18 +42,25 @@ float NetworkTrainer::evaluateNetwork(const NeuralNetwork& network,
 void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSettings& settings) {
     if (!settings.verbose) return;
 
-    auto decay = float(pow(1-settings.decay, result.generationsTrained));
+    auto decay = static_cast<float>(pow(1 - settings.decayRate, result.generationsTrained));
 
     switch (settings.algorithm) {
         case TrainingAlgorithm::GENETIC:
-        case TrainingAlgorithm::NEUROEVOLUTION:
-        case TrainingAlgorithm::RANDOM_SEARCH: {
+        case TrainingAlgorithm::NEUROEVOLUTION: {
             bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
             std::cout << "Gen " << std::setw(5) << result.generationsTrained
               << " | Best" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestFitness
               << " | Avg: " << std::setw(10) << std::setprecision(4) << result.averageFitness
               << " | " << (isGenetic ? "Mutation: " : "Noise Scale: ") << std::setw(10) << std::setprecision(4)
-              << (isGenetic ? settings.mutationStdDev*decay : settings.noiseScale*decay)
+              << settings.noiseStdDev*decay
+              << std::endl;
+            break;
+        }
+        case TrainingAlgorithm::RANDOM_SEARCH: {
+            std::cout << "Gen " << std::setw(5) << result.generationsTrained
+              << " | Best" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestFitness
+              << " | Noise Scale: " << std::setw(10) << std::setprecision(4)
+              << settings.noiseStdDev*decay
               << std::endl;
             break;
         }
@@ -59,7 +74,7 @@ void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSet
     }
 }
 
-void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
+void NetworkTrainer::evaluatePopulationParallel(const std::vector<NeuralNetwork>& population,
                                                 std::vector<float>& fitness,
                                                 const RewardFunction& reward,
                                                 const TrainingSettings& settings,
@@ -68,8 +83,8 @@ void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& popu
         fitness.resize(population.size());
     }
 
-    uint32_t numThreads = settings.numThreads == 0 ? std::thread::hardware_concurrency() : settings.numThreads;
-    uint32_t batchSize = settings.batchSize == 0 ? std::max(1u, uint32_t(population.size() / (numThreads * 4))) : settings.batchSize;
+    const uint32_t numThreads = settings.numThreads == 0 ? std::thread::hardware_concurrency() : settings.numThreads;
+    const uint32_t batchSize = settings.batchSize == 0 ? std::max(1u, static_cast<uint32_t>(population.size() / (numThreads * 4))) : settings.batchSize;
 
     std::mutex mtx;
     size_t nextIndex = skipIdx;
@@ -192,7 +207,6 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
                                   const RewardFunction& reward,
                                   const TrainingSettings& settings) {
     std::mt19937 rng(settings.randomSeed ? settings.randomSeed : std::random_device{}());
-    std::uniform_real_distribution mutationProb(0.0f, 1.0f);
 
     // Initialize population
     std::vector<NeuralNetwork> population;
@@ -201,7 +215,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
     population.reserve(settings.populationSize);
     fitness.resize(settings.populationSize);
 
-    float mutationStdDev = settings.mutationStdDev;
+    float mutationStdDev = settings.noiseStdDev;
 
     for (uint32_t i = 0; i < settings.populationSize; ++i) {
         population.push_back(network.clone());
@@ -221,7 +235,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
-        mutationStdDev *= 1-settings.decay;
+        mutationStdDev *= 1-settings.decayRate;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -230,7 +244,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
         // Track best
         float bestFit = fitness[indices[0]];
-        float avgFit = std::accumulate(fitness.begin(), fitness.end(), 0.0f) / float(fitness.size());
+        float avgFit = std::accumulate(fitness.begin(), fitness.end(), 0.0f) / static_cast<float>(fitness.size());
 
         if (bestFit > result.bestFitness) {
             result.bestFitness = bestFit;
@@ -245,7 +259,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         }
 
         // Check termination conditions
-        if (bestFit >= settings.targetFitness) {
+        if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
             result.generationsTrained = gen + 1;
             return;
         }
@@ -258,14 +272,14 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         // Elitism: keep top performers
 
         uint32_t idx = 0;
-        uint32_t eliteSize = std::max(1u, uint32_t(float(settings.populationSize) * settings.elitePercent));
+        uint32_t eliteSize = std::max(1u, static_cast<uint32_t>(static_cast<float>(settings.populationSize) * settings.topPercentage));
         for (uint32_t i = 0; i < eliteSize && i < indices.size(); ++i) {
             nextGen.push_back(population[indices[i]].clone());
             nextFitness[idx++] = fitness[indices[i]];
         }
 
         // Reproduction and mutation
-        auto crossoverAmount = size_t(float(settings.populationSize) * settings.crossoverRate);
+        auto crossoverAmount = static_cast<size_t>(static_cast<float>(settings.populationSize) * settings.crossoverRate);
         std::uniform_int_distribution<size_t> parentSelection(0, std::min(crossoverAmount, indices.size() - 1));
 
         for (size_t n = eliteSize; n < settings.populationSize; ++n) {
@@ -277,8 +291,8 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
             NeuralNetwork offspring = population[parent1Idx].clone();
 
             // Crossover: blend with parent2
-            float crossoverBlend = 0.5f;
             for (size_t layer = 0; layer < offspring.getLayerCount(); ++layer) {
+                float crossoverBlend = 0.5f;
                 auto& offWeights = offspring.getLayer(layer).getWeights();
                 const auto& p2Weights = population[parent2Idx].getLayer(layer).getWeights();
 
@@ -306,19 +320,15 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
                 // Mutate weights
                 for (auto& row : weights) {
                     for (auto& w : row) {
-                        if (mutationProb(rng) < settings.mutationRate) {
-                            std::normal_distribution<float> mutationDist(0.0f, mutationStdDev);
-                            w += mutationDist(rng);
-                        }
+                        std::normal_distribution mutationDist(0.0f, mutationStdDev);
+                        w += mutationDist(rng);
                     }
                 }
 
                 // Mutate biases
                 for (auto& b : biases) {
-                    if (mutationProb(rng) < settings.mutationRate) {
-                        std::normal_distribution<float> mutationDist(0.0f, mutationStdDev);
-                        b += mutationDist(rng);
-                    }
+                    std::normal_distribution mutationDist(0.0f, mutationStdDev);
+                    b += mutationDist(rng);
                 }
             }
 
@@ -336,9 +346,9 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
         population = nextGen;
         fitness = nextFitness;
-    }
 
-    result.generationsTrained = settings.generations;
+        result.generationsTrained++;
+    }
 }
 
 void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
@@ -350,7 +360,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
     std::vector<NeuralNetwork> population;
     std::vector<float> fitness;
 
-    float noiseScale = settings.noiseScale;
+    float noiseScale = settings.noiseStdDev;
 
     for (uint32_t i = 0; i < settings.populationSize; ++i) {
         auto individual = network.clone();
@@ -370,7 +380,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
-        noiseScale *= 1-settings.decay;
+        noiseScale *= 1-settings.decayRate;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -378,7 +388,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
                           [&fitness](size_t a, size_t b) { return fitness[a] > fitness[b]; });
 
         float bestFit = fitness[indices[0]];
-        float avgFit = std::accumulate(fitness.begin(), fitness.end(), 0.0f) / float(fitness.size());
+        const float avgFit = std::accumulate(fitness.begin(), fitness.end(), 0.0f) / static_cast<float>(fitness.size());
 
         if (bestFit > result.bestFitness) {
             result.bestFitness = bestFit;
@@ -393,7 +403,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         }
 
         // Check termination
-        if (bestFit >= settings.targetFitness) {
+        if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
             result.generationsTrained = gen + 1;
             return;
         }
@@ -404,7 +414,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         nextFitness.resize(settings.populationSize);
 
         uint32_t idx = 0;
-        uint32_t topCount = std::min(settings.topSpecimens, uint32_t(indices.size()));
+        const uint32_t topCount = static_cast<uint32_t>(std::min(settings.topPercentage * static_cast<float>(population.size()), static_cast<float>(indices.size())));
         for (uint32_t i = 0; i < topCount; ++i) {
             nextGen.push_back(population[indices[i]].clone());
             nextFitness[idx++] = fitness[indices[i]];
@@ -420,10 +430,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
         }
 
         if (settings.enableMultithreading) {
-            std::vector offspringToEval(nextGen.begin() + topCount, nextGen.end());
-            std::vector<float> offspringFitness;
-            evaluatePopulationParallel(offspringToEval, offspringFitness, reward, settings);
-            nextFitness.insert(nextFitness.end(), offspringFitness.begin(), offspringFitness.end());
+            evaluatePopulationParallel(nextGen, nextFitness, reward, settings, topCount);
         } else {
             for (uint32_t i = topCount; i < settings.populationSize; ++i) {
                 float fit = evaluateNetwork(nextGen[i], reward);
@@ -433,9 +440,9 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
 
         population = nextGen;
         fitness = nextFitness;
-    }
 
-    result.generationsTrained = settings.generations;
+        result.generationsTrained++;
+    }
 }
 
 void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
@@ -447,12 +454,12 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
     result.bestFitness = bestFit;
     bestNetwork = network.clone();
 
-    float noiseScale = settings.noiseScale;
+    float noiseScale = settings.noiseStdDev;
 
     // Random search iterations
     uint32_t iterations = 0;
     while (iterations < settings.generations) {
-        noiseScale *= 1-settings.decay;
+        noiseScale *= 1-settings.decayRate;
         // Create random perturbation
         auto candidate = bestNetwork.clone();
         candidate.addNoise(noiseScale);
@@ -471,15 +478,14 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
             logProgress(result, settings);
         }
 
-        if (bestFit >= settings.targetFitness) {
+        if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
             result.generationsTrained = iterations + 1;
             return;
         }
 
         iterations++;
+        result.generationsTrained++;
     }
-
-    result.generationsTrained = iterations;
 }
 
 void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
@@ -490,9 +496,6 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
     }
     if (settings.trainingData->inputs.empty()) {
         throw std::invalid_argument("Training data is empty");
-    }
-    if (settings.learningRate <= 0) {
-        throw std::invalid_argument("Learning rate must be positive");
     }
 
     auto startTime = std::chrono::high_resolution_clock::now();
@@ -512,7 +515,7 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
     if (settings.verbose) {
         std::cout << "Starting training with Gradient Descent (Backprop)\n"
                   << "Learning rate: " << learningRate << "\n"
-                  << "Learning rate decay: " << settings.decay << "\n"
+                  << "Learning rate decay: " << settings.decayRate << "\n"
                   << "Batch size: " << (settings.batchSize == 0 ? dataSize : settings.batchSize) << "\n"
                   << std::string(60, '-') << std::endl;
     }
@@ -522,8 +525,8 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
 
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
         // Decay learning rate
-        if (settings.decay > 0) {
-            learningRate = settings.learningRate * std::pow(1.0f - settings.decay, float(gen));
+        if (settings.decayRate > 0) {
+            learningRate = settings.learningRate * std::pow(1.0f - settings.decayRate, static_cast<float>(gen));
         }
 
         // Determine batch size
@@ -549,13 +552,13 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
                 sampleMSE += error * error;
                 outputGradients[i] = 2.0f * error;  // MSE gradient
             }
-            batchMSE += sampleMSE / float(predictions.size());
+            batchMSE += sampleMSE / static_cast<float>(predictions.size());
 
             // Backward pass
             network.backward(outputGradients);
         }
 
-        batchMSE /= float(batchSize);
+        batchMSE /= static_cast<float>(batchSize);
 
         // Update weights once per batch
         network.updateWeights(learningRate);
@@ -570,21 +573,21 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
                     fullDatasetMSE += error * error;
                 }
             }
-            fullDatasetMSE /= float(inputs.size() * network.getOutputSize());
-            float rmse = std::sqrt(fullDatasetMSE);
+            fullDatasetMSE /= static_cast<float>(inputs.size() * network.getOutputSize());
+            float RMSE = std::sqrt(fullDatasetMSE);
 
-            if (rmse < result.bestRMSE) {
-                result.bestRMSE = rmse;
+            if (RMSE < result.bestRMSE) {
+                result.bestRMSE = RMSE;
                 bestNetwork = network.clone();
             }
 
-            result.history.push_back(rmse);
+            result.history.push_back(RMSE);
 
             logProgress(result, settings);
         }
 
         // Check termination
-        if (result.bestFitness >= settings.targetFitness) {
+        if (settings.targetPerformanceEnable && result.bestRMSE <= settings.targetPerformance) {
             result.generationsTrained = gen + 1;
             break;
         }

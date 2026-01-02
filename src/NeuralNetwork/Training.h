@@ -19,6 +19,7 @@ struct TrainingData {
 };
 
 enum class TrainingAlgorithm {
+    NONE,              // Default
     GENETIC,           // Genetic algorithm
     NEUROEVOLUTION,    // Neuroevolution (NEAT-like)
     RANDOM_SEARCH,     // Random search with noise
@@ -26,45 +27,34 @@ enum class TrainingAlgorithm {
 };
 
 struct TrainingSettings {
-    // Algorithm configuration
-    TrainingAlgorithm algorithm = TrainingAlgorithm::GENETIC;
+    TrainingAlgorithm algorithm = TrainingAlgorithm::NONE; // Algorithm configuration
 
-    // Population-based settings
-    uint32_t populationSize = 50;
-    uint32_t generations = 100;
-    float mutationRate = 0.1f;           // Probability of mutation per weight
-    float mutationStdDev = 0.1f;         // Standard deviation of mutation
-    float crossoverRate = 0.7f;          // Portion of population that reproduces
-    float elitePercent = 0.1f;           // Percent of population that are considered Elite and stay
+    uint32_t populationSize = 0; // Number of Networks tested per generation (GENETIC, NEUROEVOLUTION)
 
-    float decay = 0.0f;                  // Decay per generation (0 = no decay)
+    uint32_t generations = 0; // Number of generations tested
 
-    // Neuroevolution specific
-    uint32_t topSpecimens = 10;          // Number of top performers to keep
-    float noiseScale = 0.15f;            // Noise scale for exploration
+    float noiseStdDev = 0.1f; // Amount of randomness added to weights (GENETIC, NEUROEVOLUTION, RANDOM_SEARCH)
+    float crossoverRate = 0.7f; // % of population that reproduces (GENETIC)
+    float topPercentage = 0.1f; // % of population that are considered best and stay (GENETIC, NEUROEVOLUTION)
 
-    // Gradient descent specific
-    float learningRate = 0.01f;          // Learning rate (alpha)
-    uint32_t batchSize = 16;             // Mini-batch size (or 0 for full dataset)
-    TrainingData* trainingData = nullptr;// Required for GRADIENT_DESCENT, ignored for other algorithms
+    float decayRate = 0.0f; // Decay % per generation (0 = no decay)
 
-    // Training behavior
-    bool verbose = true;                 // Print progress information
-    uint32_t logInterval = 10;           // Log every N generations
-    uint32_t saveInterval = 50;          // Save network every N generations
-    std::string checkpointPath;          // Path to save checkpoints (empty = no saving)
+    float learningRate = 0.01f; // Learning rate (alpha) (GRADIENT_DESCENT)
+    uint32_t batchSize = 0; // Multithreading batch size (GENETIC, NEUROEVOLUTION)   Mini batch size (GRADIENT_DESCENT)
+    TrainingData* trainingData = nullptr; // Training Date (GRADIENT_DESCENT)
 
-    // Termination conditions
-    float targetFitness = 1000.0f;       // Stop training if fitness reaches this
+    bool verbose = true; // Enable progress reports
 
-    // Random seed
-    uint32_t randomSeed = 0;             // 0 = use system time
+    uint32_t logInterval = 50; // Progress report interval
 
-    // Multithreading
-    bool enableMultithreading = true;   // Toggle parallelization
-    uint32_t numThreads = 0;             // 0 = auto-detect
+    bool targetPerformanceEnable = false; // Stop if fitness reaches targetPerformance
+    float targetPerformance = 0.0f; // Stop training if performance reaches this
 
-    // Validation
+    uint32_t randomSeed = 0; // Random Seed (0 = use system time)
+
+    bool enableMultithreading = true; // Toggle parallelization (GENETIC, NEUROEVOLUTION, RANDOM_SEARCH)
+    uint32_t numThreads = 0; // Number of available threads (0 = auto-detect)
+
     void validate() const;
 };
 
@@ -105,11 +95,11 @@ class NetworkTrainer {
     float evaluateNetwork(const NeuralNetwork& network, const RewardFunction& reward);
     static void logProgress(const TrainingResult& result, const TrainingSettings& settings) ;
 
-    void evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
+    void evaluatePopulationParallel(const std::vector<NeuralNetwork>& population,
                                     std::vector<float>& fitness,
                                     const RewardFunction& reward,
                                     const TrainingSettings& settings,
-                                    uint32_t startIdx);
+                                    uint32_t skipIdx);
 
 public:
 
