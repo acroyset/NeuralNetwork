@@ -28,11 +28,17 @@ float evalFunction(const NeuralNetwork& network) {
     float totalError = 0.0f;
 
     for (int i = 0; i < 16; i++) {
-        const std::vector<float>& input = inputs[i];
-        float networkOut = network.forward(input)[0];
-        float expected = outputs[i][0];
+        std::vector<float> input = outputs[i];
+        std::vector<float> networkOut = network.forward(input);
+        std::vector<float> expected = inputs[i];
 
-        totalError += abs(networkOut-expected);
+        float error = 0;
+
+        for (int j = 0; j < networkOut.size(); j++) {
+            error += abs(networkOut[j]-expected[j]);
+        }
+
+        totalError += error;
     }
 
     // Return positive fitness (lower error = higher fitness)
@@ -54,7 +60,7 @@ int main() {
 
     // Configure training
     TrainingSettings settings;
-    settings.algorithm = TrainingAlgorithm::GRADIENT_DESCENT;
+    settings.algorithm = TrainingAlgorithm::GENETIC;
     settings.generations = 10000;
 
     settings.logInterval = 200;
@@ -74,8 +80,12 @@ int main() {
     std::cout << std::endl;
     const auto& bestNet = trainer.getBestNetwork();
     for (int i = 0; i < 16; i++) {
-        auto output = bestNet.forward(inputs[i]);
-        std::cout << i << " -> " << output[0] << std::endl;
+        auto output = bestNet.forward({float(i)});
+        std::cout << i << " -> ";
+        for (size_t j = 0; j < output.size(); ++j) {
+            std::cout << (output[j] > 0.5f ? 1 : 0);  // Print binary
+        }
+        std::cout << std::endl;
     }
 
     NetworkSerializer::saveJSON(bestNet, "Models/4-1_BinarySolver_01-01-26.json");

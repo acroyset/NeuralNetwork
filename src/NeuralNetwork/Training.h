@@ -34,9 +34,10 @@ struct TrainingSettings {
     uint32_t generations = 100;
     float mutationRate = 0.1f;           // Probability of mutation per weight
     float mutationStdDev = 0.1f;         // Standard deviation of mutation
-    float mutationDecay = 0.01f;         // Percent of StdDev decay per generation
     float crossoverRate = 0.7f;          // Portion of population that reproduces
     float elitePercent = 0.1f;           // Percent of population that are considered Elite and stay
+
+    float decay = 0.0f;                  // Decay per generation (0 = no decay)
 
     // Neuroevolution specific
     uint32_t topSpecimens = 10;          // Number of top performers to keep
@@ -44,7 +45,6 @@ struct TrainingSettings {
 
     // Gradient descent specific
     float learningRate = 0.01f;          // Learning rate (alpha)
-    float learningRateDecay = 0.0f;      // Decay per generation (0 = no decay)
     uint32_t batchSize = 16;             // Mini-batch size (or 0 for full dataset)
     TrainingData* trainingData = nullptr;// Required for GRADIENT_DESCENT, ignored for other algorithms
 
@@ -61,7 +61,7 @@ struct TrainingSettings {
     uint32_t randomSeed = 0;             // 0 = use system time
 
     // Multithreading
-    bool enableMultithreading = false;   // Toggle parallelization
+    bool enableMultithreading = true;   // Toggle parallelization
     uint32_t numThreads = 0;             // 0 = auto-detect
 
     // Validation
@@ -70,12 +70,13 @@ struct TrainingSettings {
 
 struct TrainingResult {
     float bestFitness = 0.0f;
+    float bestRMSE = float(pow(2, 64));
     float averageFitness = 0.0f;
     float worstFitness = 0.0f;
     uint32_t generationsTrained = 0;
     uint32_t totalEvaluations = 0;
     std::chrono::milliseconds trainingTime{0};
-    std::vector<float> fitnessHistory;
+    std::vector<float> history;
 };
 
 class NetworkTrainer {
@@ -102,8 +103,7 @@ class NetworkTrainer {
 
     // Helper functions
     float evaluateNetwork(const NeuralNetwork& network, const RewardFunction& reward);
-    static void logProgress(uint32_t generation, float best, float avg,
-                    const TrainingSettings& settings) ;
+    static void logProgress(const TrainingResult& result, const TrainingSettings& settings) ;
 
     void evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
                                     std::vector<float>& fitness,

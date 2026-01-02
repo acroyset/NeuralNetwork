@@ -31,19 +31,32 @@ float NetworkTrainer::evaluateNetwork(const NeuralNetwork& network,
     return reward(network);
 }
 
-void NetworkTrainer::logProgress(const uint32_t generation, const float best, const float avg,
-                                const TrainingSettings& settings) {
+void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSettings& settings) {
     if (!settings.verbose) return;
 
-    auto decay = float(pow(1-settings.mutationDecay, generation));
-    bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
+    auto decay = float(pow(1-settings.decay, result.generationsTrained));
 
-    std::cout << "Gen " << std::setw(5) << generation
-              << " | Best: " << std::setw(10) << std::fixed << std::setprecision(4) << best
-              << " | Avg: " << std::setw(10) << std::setprecision(4) << avg
+    switch (settings.algorithm) {
+        case TrainingAlgorithm::GENETIC:
+        case TrainingAlgorithm::NEUROEVOLUTION:
+        case TrainingAlgorithm::RANDOM_SEARCH: {
+            bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
+            std::cout << "Gen " << std::setw(5) << result.generationsTrained
+              << " | Best" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestFitness
+              << " | Avg: " << std::setw(10) << std::setprecision(4) << result.averageFitness
               << " | " << (isGenetic ? "Mutation: " : "Noise Scale: ") << std::setw(10) << std::setprecision(4)
               << (isGenetic ? settings.mutationStdDev*decay : settings.noiseScale*decay)
               << std::endl;
+            break;
+        }
+        case TrainingAlgorithm::GRADIENT_DESCENT: {
+            std::cout << "Gen " << std::setw(5) << result.generationsTrained
+              << " | RMSE" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestRMSE
+              << " | LR: " << std::setw(10) << std::setprecision(4)
+              << settings.learningRate*decay << std::endl;
+            break;
+        }
+    }
 }
 
 void NetworkTrainer::evaluatePopulationParallel(std::vector<NeuralNetwork>& population,
@@ -161,13 +174,15 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
     network = bestNetwork.clone();
 
     if (settings.verbose) {
-        logProgress(result.generationsTrained, result.bestFitness, result.averageFitness, settings);
-        std::cout << std::string(60, '-') << "\n"
-                  << "Training complete!\n"
-                  << "Best fitness: " << result.bestFitness << "\n"
-                  << "Total evaluations: " << result.totalEvaluations << "\n"
-                  << "Total generations: " << result.generationsTrained << "\n"
-                  << "Training time: " << result.trainingTime.count() << " ms\n";
+        bool GD = settings.algorithm == TrainingAlgorithm::GRADIENT_DESCENT;
+
+        logProgress(result, settings);
+        std::cout << std::string(60, '-') << "\n";
+        std::cout << "Training complete!\n";
+        std::cout << "Best " << (GD ? "RMSE" : "fitness") << ": " << (GD ? result.bestRMSE : result.bestFitness) << "\n";
+        if (!GD) std::cout << "Total evaluations: " << result.totalEvaluations << "\n";
+        std::cout << "Total generations: " << result.generationsTrained << "\n";
+        std::cout << "Training time: " << result.trainingTime.count() << " ms\n";
     }
 
     return result;
@@ -206,7 +221,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
-        mutationStdDev *= 1-settings.mutationDecay;
+        mutationStdDev *= 1-settings.decay;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -222,10 +237,11 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
             bestNetwork = population[indices[0]].clone();
         }
 
-        result.fitnessHistory.push_back(bestFit);
+        result.history.push_back(bestFit);
+        result.averageFitness = avgFit;
 
         if (gen % settings.logInterval == 0) {
-            logProgress(gen, bestFit, avgFit, settings);
+            logProgress(result, settings);
         }
 
         // Check termination conditions
@@ -252,7 +268,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         auto crossoverAmount = size_t(float(settings.populationSize) * settings.crossoverRate);
         std::uniform_int_distribution<size_t> parentSelection(0, std::min(crossoverAmount, indices.size() - 1));
 
-        for (size_t i = eliteSize; i < settings.populationSize; ++i) {
+        for (size_t n = eliteSize; n < settings.populationSize; ++n) {
             // Select parents
             size_t parent1Idx = indices[parentSelection(rng)];
             size_t parent2Idx = indices[parentSelection(rng)];
@@ -354,7 +370,7 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
 
     // Main loop
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
-        noiseScale *= 1-settings.mutationDecay;
+        noiseScale *= 1-settings.decay;
         // Sort by fitness
         std::vector<size_t> indices(population.size());
         std::iota(indices.begin(), indices.end(), 0);
@@ -369,10 +385,11 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
             bestNetwork = population[indices[0]].clone();
         }
 
-        result.fitnessHistory.push_back(bestFit);
+        result.history.push_back(bestFit);
+        result.averageFitness = avgFit;
 
         if (gen % settings.logInterval == 0) {
-            logProgress(gen, bestFit, avgFit, settings);
+            logProgress(result, settings);
         }
 
         // Check termination
@@ -435,7 +452,7 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
     // Random search iterations
     uint32_t iterations = 0;
     while (iterations < settings.generations) {
-        noiseScale *= 1-settings.mutationDecay;
+        noiseScale *= 1-settings.decay;
         // Create random perturbation
         auto candidate = bestNetwork.clone();
         candidate.addNoise(noiseScale);
@@ -448,10 +465,10 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
             bestNetwork = candidate.clone();
         }
 
-        result.fitnessHistory.push_back(bestFit);
+        result.history.push_back(bestFit);
 
         if (iterations % settings.logInterval == 0) {
-            logProgress(iterations, bestFit, bestFit, settings);
+            logProgress(result, settings);
         }
 
         if (bestFit >= settings.targetFitness) {
@@ -495,7 +512,7 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
     if (settings.verbose) {
         std::cout << "Starting training with Gradient Descent (Backprop)\n"
                   << "Learning rate: " << learningRate << "\n"
-                  << "Learning rate decay: " << settings.learningRateDecay << "\n"
+                  << "Learning rate decay: " << settings.decay << "\n"
                   << "Batch size: " << (settings.batchSize == 0 ? dataSize : settings.batchSize) << "\n"
                   << std::string(60, '-') << std::endl;
     }
@@ -505,8 +522,8 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
 
     for (uint32_t gen = 0; gen < settings.generations; ++gen) {
         // Decay learning rate
-        if (settings.learningRateDecay > 0) {
-            learningRate = settings.learningRate * std::pow(1.0f - settings.learningRateDecay, float(gen));
+        if (settings.decay > 0) {
+            learningRate = settings.learningRate * std::pow(1.0f - settings.decay, float(gen));
         }
 
         // Determine batch size
@@ -555,21 +572,15 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
             }
             fullDatasetMSE /= float(inputs.size() * network.getOutputSize());
             float rmse = std::sqrt(fullDatasetMSE);
-            float fitness = 64.0f - rmse;
 
-            if (fitness > result.bestFitness) {
-                result.bestFitness = fitness;
+            if (rmse < result.bestRMSE) {
+                result.bestRMSE = rmse;
                 bestNetwork = network.clone();
             }
 
-            result.fitnessHistory.push_back(fitness);
+            result.history.push_back(rmse);
 
-            if (settings.verbose) {
-                std::cout << "Gen " << std::setw(5) << gen
-                          << " | RMSE: " << std::setw(10) << std::fixed << std::setprecision(4) << rmse
-                          << " | LR: " << std::setw(10) << std::setprecision(6) << learningRate
-                          << std::endl;
-            }
+            logProgress(result, settings);
         }
 
         // Check termination
@@ -584,12 +595,4 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
     auto endTime = std::chrono::high_resolution_clock::now();
     result.trainingTime = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
     network = bestNetwork.clone();
-
-    if (settings.verbose) {
-        std::cout << std::string(60, '-') << "\n"
-                  << "Training complete!\n"
-                  << "Best fitness: " << result.bestFitness << "\n"
-                  << "Total generations: " << result.generationsTrained << "\n"
-                  << "Training time: " << result.trainingTime.count() << " ms\n";
-    }
 }
