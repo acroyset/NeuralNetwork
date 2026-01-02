@@ -28,10 +28,11 @@ struct TrainingSettings {
     // Population-based settings
     uint32_t populationSize = 50;
     uint32_t generations = 100;
-    float mutationRate = 0.1f;           // Probability of mutation per weight
-    float mutationStdDev = 0.1f;         // Standard deviation of mutation
+    float mutationRate = 0.1f;          // Probability of mutation per weight
+    float mutationStdDev = 0.1f;        // Standard deviation of mutation
     float mutationDecay = 0.01f;        // Percent of StdDev decay per generation
-    float crossoverRate = 0.7f;          // Portion of population that reproduces
+    float crossoverRate = 0.7f;         // Portion of population that reproduces
+    float elitePercent = 0.1f;          // Percent of population that are considered Elite and stay
 
     // Neuroevolution specific
     uint32_t topSpecimens = 10;          // Number of top performers to keep

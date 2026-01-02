@@ -26,47 +26,50 @@ std::vector<std::vector<float>> outputs = {
 };
 
 float evalFunction(const NeuralNetwork& network) {
-    float totalFitness = 0.0f;
+    float totalError = 0.0f;
 
     for (int i = 0; i < 16; i++) {
-        float input = inputs[i];
-
+        float input = inputs[i] / 16.0f;
         std::vector<float> networkOut = network.forward({input});
         std::vector<float> expected = outputs[i];
 
-        float fitness = 0;
-
         for (int j = 0; j < 4; j++) {
-            fitness -= float(pow(networkOut[j] - expected[j], 2));
+            totalError += std::abs(networkOut[j] - expected[j]);
         }
-
-        totalFitness += fitness;
     }
 
-    return totalFitness/16;
+    // Return positive fitness (lower error = higher fitness)
+    return 64.0f - totalError;  // Max is 64 (16 samples * 4 bits)
 }
 
 int main() {
     std::vector<ActivationFunction*> activations = {
-        new LeakyReLU(),
-        new LeakyReLU(),
-        new LeakyReLU(),
+        new ReLU(),
+        new ReLU(),
+        new ReLU(),
+        new ReLU(),
         new Sigmoid()
     };
 
-    NeuralNetwork network(1, 4, {16, 32, 8}, activations);
+    NeuralNetwork network(1, 4, {128, 64, 32, 16}, activations);
+
+    for (size_t i = 0; i < network.getLayerCount(); ++i) {
+        network.getLayer(i).heInitialize();
+    }
 
     // Configure training
     TrainingSettings settings;
     settings.algorithm = TrainingAlgorithm::GENETIC;
     settings.populationSize = 128;
-    settings.generations = 1000;
-    settings.mutationRate = 0.1f;
-    settings.mutationStdDev = 0.5f;
-    settings.mutationDecay = 0.0005f;
+    settings.generations = 5000;
+    settings.mutationRate = 0.3f;
+    settings.mutationStdDev = 0.8f;
+    settings.mutationDecay = 0.0f;
+    settings.crossoverRate = 0.8f;
+    settings.elitePercent = 0.1f;
     settings.verbose = true;
-    settings.logInterval = 100;
-    settings.targetFitness = 0.0f;
+    settings.logInterval = 500;
+    settings.targetFitness = 64.0f;
 
     // Train
     NetworkTrainer trainer;
@@ -74,7 +77,7 @@ int main() {
 
     const auto& bestNet = trainer.getBestNetwork();
     for (int i = 0; i < 16; i++) {
-        auto output = bestNet.forward({float(i)});
+        auto output = bestNet.forward({float(i)/16.0f});
         std::cout << i << " -> ";
         for (int j = 0; j < 4; j++) {
             std::cout << output[j] << " ";

@@ -176,15 +176,15 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         std::vector<float> nextFitness;
 
         // Elitism: keep top performers
-        uint32_t eliteSize = std::max(1u, uint32_t(float(settings.populationSize) * 0.1f));
+        uint32_t eliteSize = std::max(1u, uint32_t(float(settings.populationSize) * settings.elitePercent));
         for (uint32_t i = 0; i < eliteSize && i < indices.size(); ++i) {
             nextGen.push_back(population[indices[i]].clone());
             nextFitness.push_back(fitness[indices[i]]);
         }
 
         // Reproduction and mutation
-        std::uniform_int_distribution<size_t> parentSelection(0,
-            std::min(size_t(float(settings.populationSize) * settings.crossoverRate), indices.size() - 1));
+        size_t crossoverAmount = float(settings.populationSize) * settings.crossoverRate;
+        std::uniform_int_distribution<size_t> parentSelection(0, std::min(crossoverAmount, indices.size() - 1));
 
         while (nextGen.size() < settings.populationSize) {
             // Select parents

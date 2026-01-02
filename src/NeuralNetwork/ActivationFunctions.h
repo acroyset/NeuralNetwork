@@ -177,3 +177,28 @@ public:
         return "SELU";
     }
 };
+
+// ==================== STEP ====================
+class STEP : public ActivationFunction {
+    float alpha = 0;
+    float beta = 1;
+
+public:
+    explicit STEP(float alpha = 0, float beta = 1) : alpha(alpha), beta(beta) {}
+
+    [[nodiscard]] float activate(float x) const override {
+        return x < 0 ? alpha : beta;
+    }
+
+    [[nodiscard]] float derivative(float x) const override {
+        return 0;
+    }
+
+    [[nodiscard]] ActivationFunction* clone() const override {
+        return new STEP(*this);
+    }
+
+    [[nodiscard]] std::string getName() const override {
+        return "STEP";
+    }
+};
