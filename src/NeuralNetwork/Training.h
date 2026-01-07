@@ -61,6 +61,7 @@ struct TrainingSettings {
 struct TrainingResult {
     float bestFitness = 0.0f;
     float bestRMSE = float(pow(2, 64));
+    float currentFitness = 0.0f;
     float averageFitness = 0.0f;
     float worstFitness = 0.0f;
     uint32_t generationsTrained = 0;

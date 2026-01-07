@@ -13,7 +13,7 @@
 void TrainingSettings::validate() const {
     if (algorithm == TrainingAlgorithm::NONE) std::cerr << "Training algorithm not set" << std::endl;
 
-    if (populationSize == 0) std::cerr << "Population size not set" << std::endl;
+    if (populationSize == 0 && algorithm != TrainingAlgorithm::GRADIENT_DESCENT) std::cerr << "Population size not set" << std::endl;
     if (populationSize < 0) std::cerr << "Population size can't be negative" << std::endl;
 
     if (generations == 0) std::cerr << "Generations not set" << std::endl;
@@ -21,9 +21,9 @@ void TrainingSettings::validate() const {
 
     if (noiseStdDev <= 0) std::cerr << "Invalid Noise standard deviation" << std::endl;
     if (crossoverRate <= 0 || crossoverRate > 1) std::cerr << "Invalid Crossover rate" << std::endl;
-    if (topPercentage <= 0 || topPercentage > 1) std::cerr << "Invalid Top Percentage" << std::endl;
+    if (topPercentage < 0 || topPercentage > 1) std::cerr << "Invalid Top Percentage" << std::endl;
 
-    if (decayRate <= 0 || decayRate > 1) std::cerr << "Invalid Decay rate" << std::endl;
+    if (decayRate < 0 || decayRate > 1) std::cerr << "Invalid Decay rate" << std::endl;
 
     if (learningRate <= 0) std::cerr << "Invalid Learning Rate" << std::endl;
     if (batchSize < 0) std::cerr << "Invalid Batch Size" << std::endl;
@@ -50,6 +50,7 @@ void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSet
             bool isGenetic = settings.algorithm == TrainingAlgorithm::GENETIC;
             std::cout << "Gen " << std::setw(5) << result.generationsTrained
               << " | Best" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestFitness
+              << " | Current" << std::setw(10) << std::fixed << std::setprecision(4) << result.currentFitness
               << " | Avg: " << std::setw(10) << std::setprecision(4) << result.averageFitness
               << " | " << (isGenetic ? "Mutation: " : "Noise Scale: ") << std::setw(10) << std::setprecision(4)
               << settings.noiseStdDev*decay
@@ -59,6 +60,7 @@ void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSet
         case TrainingAlgorithm::RANDOM_SEARCH: {
             std::cout << "Gen " << std::setw(5) << result.generationsTrained
               << " | Best" << std::setw(10) << std::fixed << std::setprecision(4) << result.bestFitness
+              << " | Current" << std::setw(10) << std::fixed << std::setprecision(4) << result.currentFitness
               << " | Noise Scale: " << std::setw(10) << std::setprecision(4)
               << settings.noiseStdDev*decay
               << std::endl;
@@ -250,6 +252,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
             result.bestFitness = bestFit;
             bestNetwork = population[indices[0]].clone();
         }
+        result.currentFitness = bestFit;
 
         result.history.push_back(bestFit);
         result.averageFitness = avgFit;
@@ -272,7 +275,7 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
         // Elitism: keep top performers
 
         uint32_t idx = 0;
-        uint32_t eliteSize = std::max(1u, static_cast<uint32_t>(static_cast<float>(settings.populationSize) * settings.topPercentage));
+        auto eliteSize = static_cast<uint32_t>(static_cast<float>(settings.populationSize) * settings.topPercentage);
         for (uint32_t i = 0; i < eliteSize && i < indices.size(); ++i) {
             nextGen.push_back(population[indices[i]].clone());
             nextFitness[idx++] = fitness[indices[i]];
@@ -395,6 +398,8 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
             bestNetwork = population[indices[0]].clone();
         }
 
+        result.currentFitness = bestFit;
+
         result.history.push_back(bestFit);
         result.averageFitness = avgFit;
 
@@ -471,6 +476,8 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
             result.bestFitness = fit;
             bestNetwork = candidate.clone();
         }
+
+        result.currentFitness = fit;
 
         result.history.push_back(bestFit);
 
