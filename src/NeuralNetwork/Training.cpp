@@ -73,6 +73,7 @@ void NetworkTrainer::logProgress(const TrainingResult& result, const TrainingSet
               << settings.learningRate*decay << std::endl;
             break;
         }
+        default: ;
     }
 }
 
@@ -127,7 +128,7 @@ void NetworkTrainer::evaluatePopulationParallel(const std::vector<NeuralNetwork>
     }
 }
 
-TrainingResult NetworkTrainer::train(NeuralNetwork& network,
+void NetworkTrainer::train(NeuralNetwork& network,
                                      const RewardFunction& reward,
                                      const TrainingSettings& settings) {
     // Validate settings
@@ -136,7 +137,6 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
     // Initialize
     auto startTime = std::chrono::high_resolution_clock::now();
     totalEvaluations = 0;
-    result = TrainingResult();
     bestNetwork = network.clone();
 
     // Set random seed
@@ -161,6 +161,7 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
             case TrainingAlgorithm::GRADIENT_DESCENT:
                 std::cout << "Gradient Descent\n";
                 break;
+            default: ;
         }
         std::cout << "Generations: " << settings.generations << std::endl;
         std::cout << std::string(60, '-') << std::endl;
@@ -180,6 +181,7 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
         case TrainingAlgorithm::GRADIENT_DESCENT:
             trainGradientDescent(network, reward, settings);
             break;
+        default: ;
     }
 
     // Record results
@@ -201,8 +203,6 @@ TrainingResult NetworkTrainer::train(NeuralNetwork& network,
         std::cout << "Total generations: " << result.generationsTrained << "\n";
         std::cout << "Training time: " << result.trainingTime.count() << " ms\n";
     }
-
-    return result;
 }
 
 void NetworkTrainer::trainGenetic(NeuralNetwork& network,
@@ -261,9 +261,10 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
             logProgress(result, settings);
         }
 
+        result.generationsTrained = gen+1;
+
         // Check termination conditions
         if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
-            result.generationsTrained = gen + 1;
             return;
         }
 
@@ -349,8 +350,6 @@ void NetworkTrainer::trainGenetic(NeuralNetwork& network,
 
         population = nextGen;
         fitness = nextFitness;
-
-        result.generationsTrained++;
     }
 }
 
@@ -407,9 +406,10 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
             logProgress(result, settings);
         }
 
+        result.generationsTrained = gen+1;
+
         // Check termination
         if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
-            result.generationsTrained = gen + 1;
             return;
         }
 
@@ -445,8 +445,6 @@ void NetworkTrainer::trainNeuroevolution(const NeuralNetwork& network,
 
         population = nextGen;
         fitness = nextFitness;
-
-        result.generationsTrained++;
     }
 }
 
@@ -485,13 +483,13 @@ void NetworkTrainer::trainRandomSearch(const NeuralNetwork& network,
             logProgress(result, settings);
         }
 
+        result.generationsTrained = iterations+1;
+
         if (settings.targetPerformanceEnable && bestFit >= settings.targetPerformance) {
-            result.generationsTrained = iterations + 1;
             return;
         }
 
         iterations++;
-        result.generationsTrained++;
     }
 }
 
@@ -593,13 +591,12 @@ void NetworkTrainer::trainGradientDescent(NeuralNetwork& network,
             logProgress(result, settings);
         }
 
+        result.generationsTrained = gen+1;
+
         // Check termination
         if (settings.targetPerformanceEnable && result.bestRMSE <= settings.targetPerformance) {
-            result.generationsTrained = gen + 1;
             break;
         }
-
-        result.generationsTrained = gen + 1;
     }
 
     auto endTime = std::chrono::high_resolution_clock::now();

@@ -106,7 +106,7 @@ public:
 
     NetworkTrainer(): bestNetwork(NeuralNetwork(1, 1, {}, {new ReLU})), totalEvaluations(0) {}
 
-    TrainingResult train(NeuralNetwork& network,
+    void train(NeuralNetwork& network,
                          const RewardFunction& reward,
                          const TrainingSettings& settings);
 
